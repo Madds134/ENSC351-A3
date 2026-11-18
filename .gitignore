@@ -1,0 +1,10 @@
+build/
+*.tgz
+*.tar.gz
+
+# Installed on the target with `npm install`
+node_modules/
+
+# Course handouts (not redistributed)
+*.pdf
+CLAUDE.md
