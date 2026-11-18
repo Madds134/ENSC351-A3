@@ -1,10 +1,11 @@
 // Incomplete implementation of an audio mixer. Search for "REVISIT" to find things
 // which are left as incomplete.
 // Note: Generates low latency audio on BeagleBone Black; higher latency found on host.
-#include "audioMixer_template.h"
+#include "audioMixer.h"
 #include <alsa/asoundlib.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <limits.h>
 #include <alloca.h> // needed for mixer
 
@@ -38,8 +39,8 @@ typedef struct {
 static playbackSound_t soundBites[MAX_SOUND_BITES];
 
 // Playback threading
-void* playbackThread(void* arg);
-static _Bool stopping = false;
+static void *playbackThread(void *arg);
+static atomic_bool stopping = false;
 static pthread_t playbackThreadId;
 static pthread_mutex_t audioMutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -50,11 +51,11 @@ void AudioMixer_init(void)
 	AudioMixer_setVolume(DEFAULT_VOLUME);
 
 	// Initialize the currently active sound-bites being played
-	// REVISIT:- Implement this. Hint: set the pSound pointer to NULL for each
-	//     sound bite.
-
-
-
+	// REVIST 1
+	for (int i = 0; i < MAX_SOUND_BITES; i++){
+		soundBites[i].pSound = NULL;
+		soundBites[i].location = 0;
+	}
 
 	// Open the PCM output
 	int err = snd_pcm_open(&handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
@@ -90,7 +91,7 @@ void AudioMixer_init(void)
 
 
 // Client code must call AudioMixer_freeWaveFileData to free dynamically allocated data.
-void AudioMixer_readWaveFileIntoMemory(char *fileName, wavedata_t *pSound)
+void AudioMixer_readWaveFileIntoMemory(const char *fileName, wavedata_t *pSound)
 {
 	assert(pSound);
 
@@ -127,6 +128,7 @@ void AudioMixer_readWaveFileIntoMemory(char *fileName, wavedata_t *pSound)
 				pSound->numSamples, fileName, samplesRead);
 		exit(EXIT_FAILURE);
 	}
+	fclose(file);
 }
 
 void AudioMixer_freeWaveFileData(wavedata_t *pSound)
@@ -144,7 +146,7 @@ void AudioMixer_queueSound(wavedata_t *pSound)
 
 	// Insert the sound by searching for an empty sound bite spot
 	/*
-	 * REVISIT: Implement this:
+	 * REVISIT 2: Implement this:
 	 * 1. Since this may be called by other threads, and there is a thread
 	 *    processing the soundBites[] array, we must ensure access is threadsafe.
 	 * 2. Search through the soundBites[] array looking for a free slot.
@@ -155,11 +157,20 @@ void AudioMixer_queueSound(wavedata_t *pSound)
 	 *    because the application most likely doesn't want to crash just for
 	 *    not being able to play another wave file.
 	 */
+	bool isQueued = false;
+	pthread_mutex_lock(&audioMutex);
+	for(int i = 0; i < MAX_SOUND_BITES && !isQueued; i++){
+		if(soundBites[i].pSound == NULL) {
+			soundBites[i].pSound = pSound; // store pSound pointer not data
+			soundBites[i].location = 0; // Start at beginning of the sound
+			isQueued = true;
+		}
+	}
+	pthread_mutex_unlock(&audioMutex);
 
-
-
-
-
+	if(!isQueued) {
+		fprintf(stderr, "All %d slot busy; sounds dropped\n", MAX_SOUND_BITES);
+	}
 }
 
 void AudioMixer_cleanup(void)
@@ -167,7 +178,7 @@ void AudioMixer_cleanup(void)
 	printf("Stopping audio...\n");
 
 	// Stop the PCM generation thread
-	stopping = true;
+	atomic_store(&stopping, true);
 	pthread_join(playbackThreadId, NULL);
 
 	// Shutdown the PCM output, allowing any pending sound to play out (drain)
@@ -228,9 +239,54 @@ void AudioMixer_setVolume(int newVolume)
 }
 
 
-// Fill the buff array with new PCM values to output.
-//    buff: buffer to fill with new PCM data from sound bites.
-//    size: the number of *values* to store into buff
+/**
+ * @brief Limits a mixed sample to the range a 16-bit PCM value can hold
+ * @param value Sum of one or more PCM samples, which may be outside the short range
+ * @return value clipped to [SHRT_MIN, SHRT_MAX]
+ */
+static short clampToShort(int value)
+{
+	if (value > SHRT_MAX) {
+		return SHRT_MAX;
+	}
+	if (value < SHRT_MIN) {
+		return SHRT_MIN;
+	}
+	return (short)value;
+}
+
+/**
+ * @brief Adds as much of one sound bite as fits into the playback buffer
+ * @details Picks up where the sound left off in the previous buffer, and
+ *          frees the slot once the whole sound has been played.
+ * @param buff Playback buffer to add PCM samples into
+ * @param size Number of samples in buff
+ * @param bite Active sound bite slot (pSound must not be NULL)
+ * @warning Caller must hold audioMutex
+ */
+static void mixSoundBite(short *buff, int size, playbackSound_t *bite)
+{
+	const short *data = bite->pSound->pData;
+	int numSamples = bite->pSound->numSamples;
+	int location = bite->location;
+
+	for (int i = 0; i < size && location < numSamples; i++, location++) {
+		buff[i] = clampToShort(buff[i] + data[location]);
+	}
+
+	bite->location = location;
+	if (location >= numSamples) {
+		bite->pSound = NULL; // Whole sound played; free the slot
+	}
+}
+
+/**
+ * @brief Fills the playback buffer with the next block of mixed audio
+ * @details Starts from silence, then adds the next chunk of every active
+ *          sound bite. Called by the playback thread before each ALSA write.
+ * @param buff Buffer to fill with new PCM data
+ * @param size Number of samples (not bytes) to store into buff
+ */
 static void fillPlaybackBuffer(short *buff, int size)
 {
 	/*
@@ -273,15 +329,21 @@ static void fillPlaybackBuffer(short *buff, int size)
 	 *          ... use someNum vs myArray[someIdx].value;
 	 *
 	 */
+	memset(buff, 0, size * sizeof(*buff));
 
-
-
+	pthread_mutex_lock(&audioMutex);
+	for (int i = 0; i < MAX_SOUND_BITES; i++) {
+		if (soundBites[i].pSound != NULL) {
+			mixSoundBite(buff, size, &soundBites[i]);
+		}
+	}
+	pthread_mutex_unlock(&audioMutex);
 }
 
-
-void* playbackThread(void* _arg)
+static void *playbackThread(void *arg)
 {
-	while (!stopping) {
+	(void)arg;
+	while (!atomic_load(&stopping)) {
 		// Generate next block of audio
 		fillPlaybackBuffer(playbackBuffer, playbackBufferSize);
 
@@ -299,8 +361,8 @@ void* playbackThread(void* _arg)
 					frames);
 			exit(EXIT_FAILURE);
 		}
-		if (frames > 0 && frames < playbackBufferSize) {
-			printf("Short write (expected %li, wrote %li)\n",
+		if (frames > 0 && frames < (snd_pcm_sframes_t)playbackBufferSize) {
+			printf("Short write (expected %lu, wrote %li)\n",
 					playbackBufferSize, frames);
 		}
 	}

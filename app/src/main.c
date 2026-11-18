@@ -1,35 +1,51 @@
-// Main program for the light sampler: initializes all modules, waits for
-// the UDP "stop" command, then cleans everything up in reverse order.
+// Temporary test for the beat player: plays each mode and tempo in turn.
 
-#include "stop.h"
-#include "periodTimer.h"
-#include "sampler.h"
-#include "reporter.h"
-#include "flash_control.h"
-#include "UDP.h"
+#include "beat_player.h"
+#include "hal/timing.h"
 
 #include <stdio.h>
 
+#define SECTION_MS 6000
+#define ONE_SECOND_MS 1000
+#define FAST_TEMPO 200
+#define SLOW_TEMPO 80
+#define TOO_FAST_TEMPO 500
+#define TOO_SLOW_TEMPO 10
+
+static void printState(const char *label)
+{
+    printf("%s: mode %d, %d BPM\n", label, BeatPlayer_getMode(), BeatPlayer_getTempo());
+}
+
 int main(void)
 {
-    printf("Light sampler starting...\n");
+    BeatPlayer_init();
 
-    Stop_init();
-    Period_init();
-    Sampler_init();
-    Reporter_init();
-    FlashControl_init();
-    UDP_init();
+    printState("Rock, default");
+    Timing_sleepMs(SECTION_MS);
 
-    Stop_waitForRequest();
+    BeatPlayer_setTempo(FAST_TEMPO);
+    printState("Rock, fast");
+    Timing_sleepMs(SECTION_MS);
 
-    UDP_cleanup();
-    FlashControl_cleanup();
-    Reporter_cleanup();
-    Sampler_cleanup();
-    Period_cleanup();
-    Stop_cleanup();
+    BeatPlayer_cycleMode();
+    BeatPlayer_setTempo(SLOW_TEMPO);
+    printState("Custom (boom-bap), slow");
+    Timing_sleepMs(SECTION_MS);
 
-    printf("Light sampler done.\n");
+    BeatPlayer_cycleMode();
+    printState("None, with a snare every second");
+    for (int i = 0; i < SECTION_MS / ONE_SECOND_MS; i++) {
+        BeatPlayer_playSound(DRUM_SNARE);
+        Timing_sleepMs(ONE_SECOND_MS);
+    }
+
+    BeatPlayer_setTempo(TOO_FAST_TEMPO);
+    printState("Clamp test, asked for 500");
+    BeatPlayer_setTempo(TOO_SLOW_TEMPO);
+    printState("Clamp test, asked for 10");
+
+    BeatPlayer_cleanup();
+    printf("Done\n");
     return 0;
 }

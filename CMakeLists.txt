@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.18)
 set(CMAKE_C_COMPILER /usr/bin/aarch64-linux-gnu-gcc)
 
-project(light_sampler VERSION 1.0 DESCRIPTION "Light dip detector" LANGUAGES C)
+project(beatbox VERSION 1.0 DESCRIPTION "Drum beat-box" LANGUAGES C)
 
 # Compiler options (inherited by sub-folders)
 set(CMAKE_C_STANDARD 11)
