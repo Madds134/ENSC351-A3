@@ -1,5 +1,8 @@
+#include <dirent.h>
 #include <gpiod.h>
+#include <limits.h>
 #include <stdio.h>
+#include <string.h>
 #include "hal/gpio_init.h"
 
 // Kernel-side queue for edge events. The kernel default (16 per line) can
@@ -110,4 +113,68 @@ cleanup:
     gpiod_chip_close(chip);
 
     return request;
+}
+
+#define DEV_DIR "/dev"
+#define GPIOCHIP_PREFIX "gpiochip"
+
+int GPIO_FindLine(
+    const char *line_name,
+    char *chip_path,
+    size_t chip_path_len,
+    unsigned int *line_offset)
+{
+    if (line_name == NULL || chip_path == NULL || chip_path_len == 0 || line_offset == NULL)
+    {
+        fprintf(stderr, "GPIO_FindLine: bad argument\n");
+        return -1;
+    }
+
+    DIR *dir = opendir(DEV_DIR);
+    if (dir == NULL)
+    {
+        perror("GPIO_FindLine: opening " DEV_DIR " failed");
+        return -1;
+    }
+
+    int result = -1;
+    struct dirent *entry;
+    while (result != 0 && (entry = readdir(dir)) != NULL)
+    {
+        if (strncmp(entry->d_name, GPIOCHIP_PREFIX, strlen(GPIOCHIP_PREFIX)) != 0)
+        {
+            continue;
+        }
+
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), DEV_DIR "/%s", entry->d_name);
+        if (!gpiod_is_gpiochip_device(path))
+        {
+            continue;
+        }
+
+        struct gpiod_chip *chip = gpiod_chip_open(path);
+        if (chip == NULL)
+        {
+            continue;
+        }
+
+        int offset = gpiod_chip_get_line_offset_from_name(chip, line_name);
+        gpiod_chip_close(chip);
+
+        if (offset >= 0)
+        {
+            snprintf(chip_path, chip_path_len, "%s", path);
+            *line_offset = (unsigned int)offset;
+            result = 0;
+        }
+    }
+
+    closedir(dir);
+
+    if (result != 0)
+    {
+        fprintf(stderr, "GPIO_FindLine: no GPIO line named \"%s\"\n", line_name);
+    }
+    return result;
 }

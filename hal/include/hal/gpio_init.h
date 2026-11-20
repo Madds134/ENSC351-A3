@@ -39,4 +39,23 @@ struct gpiod_line_request *GPIO_Init(
     enum gpiod_line_edge edge,
     unsigned long debounce_us);
 
+/**
+ * @brief Finds which GPIO chip and line offset carry a named line
+ *
+ * Searches every /dev/gpiochipN for a line with the given name. On the
+ * BeagleY-AI, header pins are named after their Raspberry Pi GPIO number
+ * (e.g. "GPIO4" is header pin 7), the same names `gpiofind` uses.
+ *
+ * @param line_name     line name to look for, e.g. "GPIO4"
+ * @param chip_path     filled in with the chip's path, e.g. "/dev/gpiochip2"
+ * @param chip_path_len size of the chip_path buffer
+ * @param line_offset   filled in with the line's offset on that chip
+ * @return int 0 on success, -1 if no chip has a line with that name
+ */
+int GPIO_FindLine(
+    const char *line_name,
+    char *chip_path,
+    size_t chip_path_len,
+    unsigned int *line_offset);
+
 #endif

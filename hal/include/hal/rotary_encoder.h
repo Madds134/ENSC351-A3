@@ -1,6 +1,6 @@
 /**
  * @file rotary_encoder.h
- * @brief HAL for the rotary encoder (PEC12R) on GPIO23 / GPIO24
+ * @brief HAL for the rotary encoder (PEC12R): channel A on GPIO2, B on GPIO3
  * @details Watches both encoder pins for edges and decodes the quadrature
  *          signal. One full detent (click) of the knob is reported as one step.
  */
@@ -29,5 +29,14 @@ void Rotary_cleanup(void);
  * @warning Rotary_init() must be called first
  */
 int Rotary_waitStep(int timeoutMs, int *step);
+
+/**
+ * @brief Reads the raw levels of channels A and B (for debugging/display)
+ * @param a Set to 1 if channel A is high, 0 if low
+ * @param b Set to 1 if channel B is high, 0 if low
+ * @return 0 on success, -1 on error
+ * @note Safe to call from another thread while Rotary_waitStep() is blocked
+ */
+int Rotary_readLevels(int *a, int *b);
 
 #endif

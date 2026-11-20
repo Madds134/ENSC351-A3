@@ -21,3 +21,12 @@ add_custom_command(TARGET beatbox POST_BUILD
         "${CMAKE_SOURCE_DIR}/beatbox-server" "${MY_APPS_DIR}/beatbox-server-copy"
     COMMENT "Deploying beatbox, wave files, and server to NFS"
 )
+
+# Live test for the rotary encoder + push button (not part of beatbox)
+add_executable(encoder_test test/encoder_test.c)
+target_link_libraries(encoder_test LINK_PRIVATE hal)
+add_custom_command(TARGET encoder_test POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "$<TARGET_FILE:encoder_test>" "${MY_APPS_DIR}/encoder_test"
+    COMMENT "Deploying encoder_test to NFS"
+)

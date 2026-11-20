@@ -3,12 +3,14 @@
 #include "hal/gpio_read.h"
 
 #include <gpiod.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
-#define ROTARY_CHIP   "/dev/gpiochip1"
-#define ROTARY_LINE_A 7   // GPIO23, header pin 16
-#define ROTARY_LINE_B 10  // GPIO24, header pin 18
+// Lines are looked up by name, so the chip/offset needn't be hardcoded
+#define ROTARY_NAME_A "GPIO2"  // channel A, header pin 3
+#define ROTARY_NAME_B "GPIO3"  // channel B, header pin 5
 #define NUM_ROTARY_LINES 2
 #define LINE_A_INDEX 0
 #define LINE_B_INDEX 1
@@ -63,10 +65,8 @@ static const int TRANSITIONS[NUM_CODES][NUM_CODES] = {
     { JUMP,     CW,       CCW,      NO_MOVE },  // from 3
 };
 
-static const unsigned int LINES[NUM_ROTARY_LINES] = {
-    [LINE_A_INDEX] = ROTARY_LINE_A,
-    [LINE_B_INDEX] = ROTARY_LINE_B,
-};
+// Line offsets of A and B on their chip, filled in by Rotary_init()
+static unsigned int lines[NUM_ROTARY_LINES];
 
 static struct gpiod_line_request *request = NULL;
 
@@ -144,7 +144,7 @@ static int processLevels(int a, int b)
 static bool readPins(int *a, int *b)
 {
     int values[NUM_ROTARY_LINES];
-    if (GPIO_ReadLines(request, LINES, NUM_ROTARY_LINES, values) != 0) {
+    if (GPIO_ReadLines(request, lines, NUM_ROTARY_LINES, values) != 0) {
         return false;
     }
     *a = values[LINE_A_INDEX];
@@ -179,8 +179,20 @@ int Rotary_init(void)
         return -1;
     }
 
-    unsigned int offsets[NUM_ROTARY_LINES] = {ROTARY_LINE_A, ROTARY_LINE_B};
-    request = GPIO_Init(ROTARY_CHIP, offsets, NUM_ROTARY_LINES,
+    // A and B must be on the same chip so they can be read at the same instant
+    char chipA[PATH_MAX];
+    char chipB[PATH_MAX];
+    if (GPIO_FindLine(ROTARY_NAME_A, chipA, sizeof(chipA), &lines[LINE_A_INDEX]) != 0 ||
+        GPIO_FindLine(ROTARY_NAME_B, chipB, sizeof(chipB), &lines[LINE_B_INDEX]) != 0) {
+        return -1;
+    }
+    if (strcmp(chipA, chipB) != 0) {
+        fprintf(stderr, "Rotary_init: %s (%s) and %s (%s) are on different chips\n",
+                ROTARY_NAME_A, chipA, ROTARY_NAME_B, chipB);
+        return -1;
+    }
+
+    request = GPIO_Init(chipA, lines, NUM_ROTARY_LINES,
                         GPIOD_LINE_DIRECTION_INPUT, GPIOD_LINE_EDGE_BOTH,
                         ROTARY_DEBOUNCE_US);
     if (request == NULL) {
@@ -208,6 +220,15 @@ void Rotary_cleanup(void)
         gpiod_line_request_release(request);
         request = NULL;
     }
+}
+
+int Rotary_readLevels(int *a, int *b)
+{
+    if (request == NULL || a == NULL || b == NULL) {
+        fprintf(stderr, "Rotary_readLevels: not initialized or bad argument\n");
+        return -1;
+    }
+    return readPins(a, b) ? 0 : -1;
 }
 
 int Rotary_waitStep(int timeoutMs, int *step)
