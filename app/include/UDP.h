@@ -1,7 +1,10 @@
 /**
  * @file UDP.h
  * @author Madden Wynans
- * @brief UDP on port 12345
+ * @brief UDP server on port 12345 for the beat-box web page
+ * @details Commands: "mode N", "volume N", "tempo N", "play N", "stop".
+ *          If N is a number it is applied; the reply is always the current
+ *          value, so "volume undefined" is a query.
  * @version 0.1
  * @date 2026-10-28
  * @copyright Copyright (c) 2026

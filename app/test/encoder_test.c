@@ -84,7 +84,7 @@ static void printStatus(void)
 int main(void)
 {
     if (Rotary_init() != 0) {
-        fprintf(stderr, "Failed to initialize the rotary encoder (GPIO2/GPIO3)\n");
+        fprintf(stderr, "Failed to initialize the rotary encoder (GPIO23/GPIO24)\n");
         return 1;
     }
     if (RotaryButton_init() != 0) {

@@ -1,6 +1,6 @@
 /**
  * @file rotary_encoder.h
- * @brief HAL for the rotary encoder (PEC12R): channel A on GPIO2, B on GPIO3
+ * @brief HAL for the rotary encoder (PEC12R): channel A on GPIO23, B on GPIO24
  * @details Watches both encoder pins for edges and decodes the quadrature
  *          signal. One full detent (click) of the knob is reported as one step.
  */

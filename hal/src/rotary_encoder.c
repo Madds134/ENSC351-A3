@@ -9,8 +9,8 @@
 #include <string.h>
 
 // Lines are looked up by name, so the chip/offset needn't be hardcoded
-#define ROTARY_NAME_A "GPIO2"  // channel A, header pin 3
-#define ROTARY_NAME_B "GPIO3"  // channel B, header pin 5
+#define ROTARY_NAME_A "GPIO23" // channel A, header pin 16 (GPIO2/3 are muxed to I2C)
+#define ROTARY_NAME_B "GPIO24" // channel B, header pin 18
 #define NUM_ROTARY_LINES 2
 #define LINE_A_INDEX 0
 #define LINE_B_INDEX 1

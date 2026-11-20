@@ -1,7 +1,7 @@
 #include "UDP.h"
 #include "stop.h"
-#include "sampler.h"
-#include "reporter.h"
+#include "beat_player.h"
+#include "audioMixer.h"
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -18,19 +18,9 @@
 #define NO_FLAGS 0
 #define REPLY_BUFFER_SIZE 256
 #define WORD_SEPARATORS " \t\r\n"
-#define HELP_OUTPUT \
-    "\nAccepted command examples:\n" \
-    "count       -- get the total number of samples taken.\n" \
-    "length      -- get the number of samples taken in the previously completed second.\n" \
-    "dips        -- get the number of dips in the previously completed second.\n" \
-    "history     -- get all the samples in the previously completed second.\n" \
-    "stop        -- cause the server program to end.\n" \
-    "<enter>     -- repeat last command.\n"
-#define UNKNOWN_OUTPUT "Unknown command. Type 'help' for the list of commands.\n"
-#define VALUES_PER_LINE 10
-#define SAMPLE_TEXT_SIZE 20
-#define NO_HISTORY_OUTPUT "No samples in the history.\n"
-
+#define UNKNOWN_COMMAND "Unknown command.\n"
+#define DECIMAL_BASE 10
+#define PLAY_OUTPUT "played"
 static int socketFd = -1;
 static pthread_t udpThread;
 static bool isInitialized = false;
@@ -73,14 +63,46 @@ static void sendReply(const char *message, const struct sockaddr_in *sender)
             (const struct sockaddr *)sender, sizeof(*sender));
 }
 
+/**
+ * @brief Sends a number as the reply
+ * @details The web page shows the reply directly, so it must be just the number
+ * @param value Number to send
+ * @param sender Address of the client that sent the command
+ */
+static void sendNumber(int value, const struct sockaddr_in *sender) {
+    char reply[REPLY_BUFFER_SIZE];
+    snprintf(reply, sizeof(reply), "%d", value);
+    sendReply(reply, sender);
+}
+
+/**
+ * @brief Reads a whole number from a command's argument
+ * @details Leading spaces are skipped. The web page polls with "undefined",
+ *          which is not a number, so it returns false for a pure query.
+ * @param arg Text after the command word (may be empty or "undefined")
+ * @param value Set to the number, only if one was found
+ * @return true if arg starts with a number, false otherwise
+ */
+static bool parseNumber(const char *arg, int *value)
+{
+    char *end;
+    long number = strtol(arg, &end, DECIMAL_BASE);
+    if(end == arg) {
+        return false;
+    }
+    *value = (int)number;
+    return true;
+}
+
 /* Command handlers for replies */
 /**
  * @brief Function signature shared by every UDP command handler
- * @details Each handler builds a specific reply to send
+ * @details Each handler applies its command (if any) and sends one reply
+ * @param arg Text after the command word
  * @param sender address of the client that sent the command
  * @return true to keep UDP server running, false to terminate it
  */
-typedef bool (*CommandHandler)(const struct sockaddr_in *sender); // Function pointer to specific command handler
+typedef bool (*CommandHandler)(const char *arg, const struct sockaddr_in *sender); // Function pointer to specific command handler
 
 /**
  * @brief Pair command with the handler
@@ -91,149 +113,93 @@ typedef struct {
 } Command;
 
 /**
- * @brief Replies with the reply text defined in the help text
+ * @brief "mode N": sets the beat mode if N is given, then replies with the current mode
+ * @param arg Text after the command word (mode number, or "undefined" to query)
  * @param sender address of the client that sent the command
  * @return true to keep UDP server running
  */
-static bool handleHelpCommand(const struct sockaddr_in *sender)
+static bool handleModeCommand(const char *arg, const struct sockaddr_in *sender)
 {
-    sendReply(HELP_OUTPUT, sender);
+    int mode;
+    if(parseNumber(arg, &mode)) {
+        BeatPlayer_setMode((BeatMode)mode);
+    }
+    sendNumber(BeatPlayer_getMode(), sender);
     return true;
 }
 
 /**
- * @brief Replies with the total number of samples taken
+ * @brief "volume N": sets the volume if N is given, then replies with the current volume
+ * @param arg Text after the command word (volume 0-100, or "undefined" to query)
  * @param sender address of the client that sent the command
  * @return true to keep UDP server running
  */
-static bool handleCountCommand(const struct sockaddr_in *sender)
+static bool handleVolumeCommand(const char *arg, const struct sockaddr_in *sender)
 {
-    char reply[REPLY_BUFFER_SIZE];
-    snprintf(reply, sizeof(reply), "# samples taken total: %lld\n", Sampler_getNumSamplesTaken());
-    sendReply(reply, sender);
+    int volume;
+    if (parseNumber(arg, &volume)) {
+        AudioMixer_setVolume(volume);
+    }
+    sendNumber(AudioMixer_getVolume(), sender);
     return true;
 }
 
 /**
- * @brief Replies with the number of samples in previous second
+ * @brief "tempo N": sets the tempo if N is given, then replies with the current tempo
+ * @param arg Text after the command word (BPM, or "undefined" to query)
  * @param sender address of the client that sent the command
- * @return true to keep UDP server running 
+ * @return true to keep UDP server running
  */
-static bool handleLengthCommand(const struct sockaddr_in *sender)
+static bool handleTempoCommand(const char *arg, const struct sockaddr_in *sender)
 {
-    char reply[REPLY_BUFFER_SIZE];
-    snprintf(reply, sizeof(reply), "# samples taken last second: %d\n", Sampler_getHistorySize());
-    sendReply(reply, sender);
+    int bpm;
+    if (parseNumber(arg, &bpm)) {
+        BeatPlayer_setTempo(bpm);
+    }
+    sendNumber(BeatPlayer_getTempo(), sender);
     return true;
 }
 
 /**
- * @brief Replies with number of dips found in previous second
+ * @brief "play N": plays drum sound N (0 = base, 1 = hi-hat, 2 = snare), then replies
+ * @param arg Text after the command word (drum sound number)
  * @param sender address of the client that sent the command
- * @return true to keep UDP server running 
+ * @return true to keep UDP server running
  */
-static bool handleDipsCommand(const struct sockaddr_in *sender)
+static bool handlePlayCommand(const char *arg, const struct sockaddr_in *sender)
 {
-    char reply[REPLY_BUFFER_SIZE];
-    snprintf(reply, sizeof(reply), "# Dips: %d\n", Reporter_getDipCount());
-    sendReply(reply, sender);
+    int sound;
+    if (parseNumber(arg, &sound)) {
+        BeatPlayer_playSound((DrumSound)sound);
+    }
+    sendReply(PLAY_OUTPUT, sender);
     return true;
 }
 
 /**
- * @brief Repies "Program terminating." and requests program to stop
+ * @brief "stop": replies "Program terminating." and requests the program to stop
+ * @param arg Unused
  * @param sender address of the client that sent the command
  * @return false to end receive loop
  */
-static bool handleStopCommand(const struct sockaddr_in *sender)
+static bool handleStopCommand(const char *arg, const struct sockaddr_in *sender)
 {
+    (void)arg;
     sendReply("Program terminating.\n", sender);
     Stop_request();
     return false;
 }
 
-/**
- * @brief Sends bytes as one packet
- * 
- * @note Claude was used to assist in the syntax needed to send a packet back to the client
- * @param packet Buffer holding the packet bytes
- * @param packetLength Bytes in the packet (Set to zero after sending)
- * @param sender address of the client that sent the command
- */
-static void sendPacket(const char *packet, size_t *packetLength, const struct sockaddr_in *sender)
-{
-    if (*packetLength > 0) {
-        sendto(socketFd, packet, *packetLength, NO_FLAGS,
-               (const struct sockaddr *)sender, sizeof(*sender));
-        *packetLength = 0;
-    }
-}
-
-/**
- * @brief Formats one sample for the history reply
- * 
- * @param text Output buffer for the formatted text
- * @param textSize Output buffer size
- * @param volts Sample voltage
- * @param index Index of sample in history
- * @param numSamples Total smaples in history
- * @return size_t Number of characters written
- * @note Claude was used to assist in syntax needed to format th esamples
- */
-static size_t formatSample(char *text, size_t textSize, double volts, int index, int numSamples)
-{
-    bool isEndOfLine = ((index + 1) % VALUES_PER_LINE == 0) || (index + 1 == numSamples);
-    int length = snprintf(text, textSize, "%.3f%s", volts, isEndOfLine ? ",\n" : ", ");
-    return (size_t)length;
-}
-
-/**
- * @brief Replies with dump of every sample from previous second
- * @param sender address of the client that sent the command
- * @return true to keep UDP server running 
- * @note Claude was used to assist with creating packet with memcpy
- */
-static bool handleHistoryCommand(const struct sockaddr_in *sender)
-{
-    int numSamples;
-    double *samples = Sampler_getHistory(&numSamples);
-    if (numSamples == 0) {
-        sendReply(NO_HISTORY_OUTPUT, sender);
-        return true;
-    }
-
-    char packet[MAX_PACKET_SIZE];
-    size_t packetLength = 0;
-    for (int i = 0; i < numSamples; i++) {
-        char text[SAMPLE_TEXT_SIZE];
-        size_t textLength = formatSample(text, sizeof(text), samples[i], i, numSamples);
-
-        if (packetLength + textLength > MAX_PACKET_SIZE) {
-            sendPacket(packet, &packetLength, sender);
-        }
-        memcpy(packet + packetLength, text, textLength); // Append formatted value to packet
-        packetLength += textLength;
-    }
-    sendPacket(packet, &packetLength, sender);
-
-    free(samples);
-    return true;
-}
-
 /* Command LUT */
 static const Command Commands[] = {
-    {"help", handleHelpCommand},
-    {"?", handleHelpCommand},
-    {"count", handleCountCommand},
-    {"length", handleLengthCommand},
-    {"dips", handleDipsCommand},
-    {"history", handleHistoryCommand},
-    {"stop", handleStopCommand},
+    {"mode", handleModeCommand},
+    {"volume", handleVolumeCommand},
+    {"tempo", handleTempoCommand},
+    {"play", handlePlayCommand},
+    {"stop", handleStopCommand}
 };
 
 #define NUM_COMMANDS (sizeof(Commands) / sizeof(Commands[0]))
-
-static const Command *lastCommand = NULL;
 
 /**
  * @brief Looks up command in LUT for first word of packet
@@ -267,19 +233,18 @@ static const Command *findCommand(const char *word, size_t wordLength)
  * 
  * @param command Terminated packet text
  * @param sender address of the client that sent the command
- * @return false if server should stip, true otherwise
+ * @return false if server should stop, true otherwise
  */
 static bool handleIncomingCommand(const char *command, const struct sockaddr_in *sender)
 {
     size_t wordLength = strcspn(command, WORD_SEPARATORS);
-    const Command *toRun = (wordLength == 0) ? lastCommand : findCommand(command, wordLength);
-
-    lastCommand = toRun;
+    const Command *toRun = findCommand(command, wordLength);
     if (toRun == NULL) {
-        sendReply(UNKNOWN_OUTPUT, sender);
+        sendReply(UNKNOWN_COMMAND, sender);
         return true;
     }
-    return toRun->handler(sender);
+    const char *arg = command + wordLength; // Text after the command word
+    return toRun->handler(arg, sender);
 }
 
 /**
