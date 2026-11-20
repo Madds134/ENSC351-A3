@@ -16,4 +16,6 @@
  */
 void Timing_sleepMs(long long delayInMs);
 
+long long Timing_getTimeMs(void);
+
 #endif

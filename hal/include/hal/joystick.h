@@ -1,7 +1,6 @@
 /**
  * @file joystick.h
  * @author Madden Wynans
- * 
  * @copyright Copyright (c) 2026
  * 
  */
@@ -10,26 +9,14 @@
 #define JOYSTICK_H
 
 typedef enum {
-    CENTRE,
-    UP,
-    DOWN,
-    LEFT,
-    RIGHT
+    JOYSTICK_CENTRE,
+    JOYSTICK_UP,
+    JOYSTICK_DOWN
 } JoystickDirection;
 
 /**
- * @brief Initializes the joystick interface
+ * @brief Gets the current joystick direction (Y direction on)
  */
-void Joystick_init(void);
-
-/**
- * @brief Cleans up the joystick interface 
- */
-void Joystick_cleanup(void);
-
-/**
- * @brief Gets the current joystick direction
- */
-JoystickDirection Joystick_get_direction(void);
+JoystickDirection Joystick_getDirection(void);
 
 #endif

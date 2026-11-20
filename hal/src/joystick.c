@@ -6,39 +6,22 @@
 
 #include "hal/joystick.h"
 #include "hal/adc.h"
-#include <stdlib.h>
 
-#define JOYSTICK_X_DIRECTION 0
-#define JOYSTICK_Y_DIRECTION 1
+#define JOYSTICK_Y_CHANNEL 3
+#define JOYSTICK_UP_THRESHOLD 3000
+#define JOYSTICK_DOWN_THRESHOLD 1000
 
-void Joystick_init(void) {
-    ADC_init();
-}
-
-void Joystick_cleanup(void) {
-    ADC_cleanup();
-}
-
-JoystickDirection Joystick_get_direction(void) {
-    uint16_t x = ADC_read_channel(JOYSTICK_X_DIRECTION);
-    uint16_t y = ADC_read_channel(JOYSTICK_Y_DIRECTION);
-
-    // UP
-    if (x < 2200 && y > 3000) {
-        return UP;
+JoystickDirection Joystick_getDirection(void)
+{
+    int y = ADC_read_channel(JOYSTICK_Y_CHANNEL);
+    if (y == ADC_READ_ERROR) {
+        return JOYSTICK_CENTRE;
     }
-    // RIGHT
-    else if(x > 3500 && y < 2200 ) {
-        return RIGHT;
+    if (y > JOYSTICK_UP_THRESHOLD) {
+        return JOYSTICK_UP;
     }
-    // LEFT
-    else if(x < 500 && y < 2200 && y > 1000) {
-        return LEFT;
+    if (y < JOYSTICK_DOWN_THRESHOLD) {
+        return JOYSTICK_DOWN;
     }
-    // DOWN
-    else if(x > 500 && y < 500) {
-        return DOWN;
-    }
-    // CENTRE
-    return CENTRE;
+    return JOYSTICK_CENTRE;
 }

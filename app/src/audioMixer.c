@@ -2,6 +2,7 @@
 // which are left as incomplete.
 // Note: Generates low latency audio on BeagleBone Black; higher latency found on host.
 #include "audioMixer.h"
+#include "periodTimer.h"
 #include <alsa/asoundlib.h>
 #include <stdbool.h>
 #include <pthread.h>
@@ -346,6 +347,7 @@ static void *playbackThread(void *arg)
 	while (!atomic_load(&stopping)) {
 		// Generate next block of audio
 		fillPlaybackBuffer(playbackBuffer, playbackBufferSize);
+		Period_markEvent(PERIOD_EVENT_AUDIO_REFILL);
 
 		// Output the audio
 		snd_pcm_sframes_t frames = snd_pcm_writei(handle,
