@@ -34,12 +34,6 @@ typedef enum {
 void BeatPlayer_init(void);
 
 /**
- * @brief Stops the beat thread and frees the drum sounds
- * @warning Call before AudioMixer_cleanup()
- */
-void BeatPlayer_cleanup(void);
-
-/**
  * @brief Plays one drum sound
  * @param sound Drum to play
  */

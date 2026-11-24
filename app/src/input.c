@@ -53,6 +53,7 @@ static AirDrum airDrums[NUM_XL_AXES] = {
 
 /**
  * @brief Measure each axis's resting reading
+ * @note Claude was used to help with logic for calibrating the XL
  */
 static void calibrateAirDrums(void)
 {
